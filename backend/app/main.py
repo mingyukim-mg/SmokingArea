@@ -9,6 +9,8 @@ from contextlib import asynccontextmanager
 import asyncio # 비동기 컨텍스트에서 동기 함수 실행을 위해 필요
 import math
 
+from app.services.naver_api import get_coordinates_from_address
+
 
 # --- 설정 변수 ---
 DATABASE_URL = "postgresql://Team_ten:1234@db:5432/tabaco_retail"
@@ -85,6 +87,45 @@ async def initialize_address_table():
         # 실제 운영 환경에서는 앱 시작 실패하도록 raise 할 수도 있음
         # raise RuntimeError(f"Database initialization failed: {e}")
 
+async def fill_missing_coordinates():
+    """
+    DB에서 좌표(x, y)가 비어 있는(-1) 레코드를 찾아 실제 좌표로 채워넣는 함수
+    - 추후 수정 예정
+    """
+    db = SessionLocal()
+    try:
+        query = text("SELECT landlot_address, road_name_address FROM address WHERE x = -1 or y = -1")
+        rows_to_update = await asyncio.to_thread(lambda: db.execute(query).fetchall())
+        
+        if not rows_to_update:
+            print("비어 있는 좌표가 없습니다.")
+            return
+        
+        print(f"총 {len(rows_to_update)}개의 좌표를 변환합니다.")
+        
+        for row in rows_to_update:
+            landlot_addr, road_addr = row
+            address = landlot_addr if landlot_addr != "비어있음" else road_addr
+            coordinates = await get_coordinates_from_address(address)
+            
+            if coordinates:
+                x, y = coordinates
+                update_query = text("UPDATE address SET x = :x, y = :y WHERE landlot_address = :landlot_address")
+                await asyncio.to_thread(
+                    db.execute, update_query, {"x": x, "y": y, "landlot_address": address}
+                )
+            else:
+                print(f"비어 있는 좌표 변환 실패: address={address}")
+            await asyncio.sleep(0.1)
+        
+        await asyncio.to_thread(db.commit)
+        print("비어 있는 좌표 업데이트 완료")
+    
+    except Exception as e:
+        print(f"비어 있는 좌표 업데이트 중 오류 발생: {e}")
+        await asyncio.to_thread(db.rollback)
+    finally:
+        db.close()
 
 # --- FastAPI 이벤트 훅 (앱 시작/종료 시 실행) ---
 @asynccontextmanager
@@ -92,6 +133,7 @@ async def lifespan(app: FastAPI):
     # 앱 시작 시 실행
     print("🚀 FastAPI 시작!")
     await initialize_address_table()  # CSV 데이터 삽입 등
+    asyncio.create_task(fill_missing_coordinates())  # 비어 있는 좌표 채우기
     yield
     # 앱 종료 시 실행
     print("👋 FastAPI 종료!")
@@ -197,6 +239,50 @@ async def get_converted_addresses(db=Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"좌표 변환 중 서버 오류 발생: {e}"
         )
+
+@app.get("/geocode")
+async def geocode_address(db=Depends(get_db)):
+    """
+    NAVER Maps API를 사용하여 주소를 경도와 위도 좌표로 변환합니다.
+    """
+    try:
+        query = text("SELECT landlot_address, road_name_address, x, y FROM address LIMIT 12")
+        rows = await asyncio.to_thread(lambda: db.execute(query).fetchall())
+        
+        if not rows:
+            return {"message": "DB에서 데이터를 찾지 못했습니다."}
+        
+        results = []
+        
+        for row in rows:
+            landlot_addr, road_addr, orig_x, orig_y = row
+            address = landlot_addr if landlot_addr != "비어있음" else road_addr
+            coordinates = await get_coordinates_from_address(address)
+            
+            if coordinates:
+                x, y = coordinates
+                results.append({
+                    "address": address,
+                    "original_x": orig_x,
+                    "original_y": orig_y,
+                    "naver_x": x,
+                    "naver_y": y
+                })
+            else:
+                results.append({
+                    "address": address,
+                    "original_x": orig_x,
+                    "original_y": orig_y,
+                    "error": "NAVER Maps API 좌표 변환 실패"
+                })
+        
+        return {"count": len(results), "results": results}
+    
+    except Exception as e:
+        print(f"NAVER Maps API 좌표 변환 중 오류 발생: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"NAVER Maps API 좌표 변환 중 서버 오류 발생: {e}")
 
 @app.get("/check-location/{latitude}/{longitude}")
 async def check_location_eligibility(
