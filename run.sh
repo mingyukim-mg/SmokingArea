@@ -7,6 +7,7 @@ sleep 10
 # macOS에서는 open, 리눅스에서는 xdg-open 사용
 if [[ "$OSTYPE" == "darwin"* ]]; then
   open "http://localhost:8000"
+  open "http://localhost:8080"
 else
   xdg-open "http://localhost:8000"
 fi
