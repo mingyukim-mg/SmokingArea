@@ -6,10 +6,11 @@ services:
     environment:
       POSTGRES_DB: tabaco_retail
       POSTGRES_USER: Team_ten
-      POSTGRES_PASSWORD: 1234040
+      POSTGRES_PASSWORD: 1234
     ports:
       - "5432:5432"
     volumes:
+      - postgres_data:/var/lib/postgresql/data
       - ./db/db/init_db.sql:/docker-entrypoint-initdb.d/1_init_db.sql
       #- ./db/db/import_data.sql:/docker-entrypoint-initdb.d/2_import_data.sql
       - ./db/db/data/:/docker-entrypoint-initdb.d/data/
@@ -45,6 +46,8 @@ services:
     restart: always
     depends_on:
       - backend
+    env_file:
+      - ./backend/.env
     ports:
       - "8080:5000"
     networks:
@@ -53,3 +56,6 @@ services:
 networks:
   app_network:
     driver: bridge
+
+volumes:
+  postgres_data:
