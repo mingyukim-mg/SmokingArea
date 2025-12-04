@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 from app.main import app
 from app.core.config import settings
-from app.core.database import get_db, Base
+from app.core.database import get_db
 
 # --- 1. 테스트용 DB 설정 (In-Memory SQLite 또는 별도 PostgreSQL 사용 권장) ---
 # CI 환경에서는 실제 PostgreSQL 서비스 컨테이너를 사용하므로, 
